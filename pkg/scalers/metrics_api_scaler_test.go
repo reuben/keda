@@ -213,9 +213,16 @@ rpc_duration_seconds_count 40
 		{name: "regex is anchored", input: inputPrometheusSeries, key: `http_requests_total{code=~"5"}`, format: PrometheusFormat, expectErr: true},
 		{name: "not regex", input: inputPrometheusSeries, key: `http_requests_total{code!~"5.."}`, format: PrometheusFormat, expectVal: 7},
 		{name: "missing label is empty", input: inputPrometheusSeries, key: `http_requests_total{method=""}`, format: PrometheusFormat, expectVal: 5},
+		{name: "sum", input: inputPrometheusSeries, key: `sum(http_requests_total{code=~"5.."})`, format: PrometheusFormat, expectVal: 8},
+		{name: "sum of metric names", input: inputPrometheusSeries, key: `sum({__name__=~"http_requests_total|rpc_duration_seconds_count"})`, format: PrometheusFormat, expectVal: 55},
+		{name: "sum of nothing", input: inputPrometheusSeries, key: `sum(http_requests_total{code="404"})`, format: PrometheusFormat, expectErr: true},
 		{name: "histogram count", input: inputPrometheusSeries, key: `request_duration_seconds_count{handler="b"}`, format: PrometheusFormat, expectVal: 2},
+		{name: "histogram count sum", input: inputPrometheusSeries, key: `sum(request_duration_seconds_count)`, format: PrometheusFormat, expectVal: 8},
 		{name: "histogram bucket", input: inputPrometheusSeries, key: `request_duration_seconds_bucket{handler="a",le="0.5"}`, format: PrometheusFormat, expectVal: 4},
 		{name: "summary count", input: inputPrometheusSeries, key: `rpc_duration_seconds_count`, format: PrometheusFormat, expectVal: 40},
+		{name: "other aggregation", input: inputPrometheusSeries, key: `max(http_requests_total)`, format: PrometheusFormat, expectErr: true},
+		{name: "grouped sum", input: inputPrometheusSeries, key: `sum by (code) (http_requests_total)`, format: PrometheusFormat, expectErr: true},
+		{name: "offset", input: inputPrometheusSeries, key: `http_requests_total offset 5m`, format: PrometheusFormat, expectErr: true},
 	}
 
 	for _, tc := range testCases {

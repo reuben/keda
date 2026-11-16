@@ -179,12 +179,20 @@ func GetValueFromResponse(body []byte, valueLocation string, format APIFormat) (
 }
 
 // getValueFromPrometheusResponse returns the value of the first series that valueLocation, a PromQL series
-// selector, matches in provided body. Histograms and summaries expose their _count, _sum and _bucket series,
-// as Prometheus scrapes them.
+// selector, matches in provided body, or with sum(<selector>), the sum of all the series it matches.
+// Histograms and summaries expose their _count, _sum and _bucket series, as Prometheus scrapes them.
 func getValueFromPrometheusResponse(body []byte, valueLocation string) (float64, error) {
-	matchers, err := promQLParser.ParseMetricSelector(valueLocation)
+	expr, err := promQLParser.ParseExpr(valueLocation)
 	if err != nil {
 		return 0, err
+	}
+	sum := false
+	if agg, ok := expr.(*parser.AggregateExpr); ok && agg.Op == parser.SUM && len(agg.Grouping) == 0 && !agg.Without {
+		sum, expr = true, agg.Expr
+	}
+	selector, ok := expr.(*parser.VectorSelector)
+	if !ok || selector.OriginalOffset != 0 || selector.Timestamp != nil || selector.StartOrEnd != 0 {
+		return 0, fmt.Errorf("valueLocation %q must be a series selector or sum(<series selector>)", valueLocation)
 	}
 
 	// Ensure EOL
@@ -211,18 +219,26 @@ func getValueFromPrometheusResponse(body []byte, valueLocation string) (float64,
 		return 0, fmt.Errorf("prometheus format parsing error: %w", err)
 	}
 
+	var value float64
+	found := false
 samples:
 	for _, sample := range samples {
-		for _, matcher := range matchers {
+		for _, matcher := range selector.LabelMatchers {
 			// A label the series doesn't have is empty, as in Prometheus
 			if !matcher.Matches(string(sample.Metric[model.LabelName(matcher.Name)])) {
 				continue samples
 			}
 		}
-		return float64(sample.Value), nil
+		if !sum {
+			return float64(sample.Value), nil
+		}
+		value += float64(sample.Value)
+		found = true
 	}
-
-	return 0, fmt.Errorf("value %s not found", valueLocation)
+	if !found {
+		return 0, fmt.Errorf("value %s not found", valueLocation)
+	}
+	return value, nil
 }
 
 // getValueFromJSONResponse uses provided valueLocation to access the numeric value in provided body using GJSON
