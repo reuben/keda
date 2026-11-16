@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	neturl "net/url"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/promql/parser"
@@ -176,17 +178,13 @@ func GetValueFromResponse(body []byte, valueLocation string, format APIFormat) (
 	return 0, fmt.Errorf("format %s not supported", format)
 }
 
-// getValueFromPrometheusResponse uses provided valueLocation to access the numeric value in provided body
+// getValueFromPrometheusResponse returns the value of the first series that valueLocation, a PromQL series
+// selector, matches in provided body. Histograms and summaries expose their _count, _sum and _bucket series,
+// as Prometheus scrapes them.
 func getValueFromPrometheusResponse(body []byte, valueLocation string) (float64, error) {
 	matchers, err := promQLParser.ParseMetricSelector(valueLocation)
 	if err != nil {
 		return 0, err
-	}
-	metricName := ""
-	for _, v := range matchers {
-		if v.Name == "__name__" {
-			metricName = v.Value
-		}
 	}
 
 	// Ensure EOL
@@ -204,49 +202,24 @@ func getValueFromPrometheusResponse(body []byte, valueLocation string) (float64,
 		return 0, fmt.Errorf("prometheus format parsing error: %w", err)
 	}
 
-	family, ok := families[metricName]
-	if !ok {
-		return 0, fmt.Errorf("metric '%s' not found", metricName)
+	// Sorted by name, so that a selector matching several metrics returns the same series every time
+	sortedFamilies := slices.SortedFunc(maps.Values(families), func(a, b *dto.MetricFamily) int {
+		return strings.Compare(a.GetName(), b.GetName())
+	})
+	samples, err := expfmt.ExtractSamples(&expfmt.DecodeOptions{}, sortedFamilies...)
+	if err != nil {
+		return 0, fmt.Errorf("prometheus format parsing error: %w", err)
 	}
 
-	metrics := family.GetMetric()
-	for _, metric := range metrics {
-		labels := metric.GetLabel()
-		match := true
+samples:
+	for _, sample := range samples {
 		for _, matcher := range matchers {
-			if matcher == nil {
-				continue
-			}
-			// The name has been already validated,
-			// so we can skip it and check the other labels
-			if matcher.Name == "__name__" {
-				continue
-			}
 			// A label the series doesn't have is empty, as in Prometheus
-			value := ""
-			for _, label := range labels {
-				if label.GetName() == matcher.Name {
-					value = label.GetValue()
-				}
-			}
-			if !matcher.Matches(value) {
-				match = false
+			if !matcher.Matches(string(sample.Metric[model.LabelName(matcher.Name)])) {
+				continue samples
 			}
 		}
-		if match {
-			untyped := metric.GetUntyped()
-			if untyped != nil && untyped.Value != nil {
-				return *untyped.Value, nil
-			}
-			counter := metric.GetCounter()
-			if counter != nil && counter.Value != nil {
-				return *counter.Value, nil
-			}
-			gauge := metric.GetGauge()
-			if gauge != nil && gauge.Value != nil {
-				return *gauge.Value, nil
-			}
-		}
+		return float64(sample.Value), nil
 	}
 
 	return 0, fmt.Errorf("value %s not found", valueLocation)

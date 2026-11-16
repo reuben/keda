@@ -170,6 +170,19 @@ func TestGetValueFromResponse(t *testing.T) {
 http_requests_total{code="200",method="get"} 7
 http_requests_total{code="500",method="get"} 3
 http_requests_total{code="503"} 5
+# TYPE request_duration_seconds histogram
+request_duration_seconds_bucket{handler="a",le="0.5"} 4
+request_duration_seconds_bucket{handler="a",le="+Inf"} 6
+request_duration_seconds_sum{handler="a"} 2.5
+request_duration_seconds_count{handler="a"} 6
+request_duration_seconds_bucket{handler="b",le="0.5"} 1
+request_duration_seconds_bucket{handler="b",le="+Inf"} 2
+request_duration_seconds_sum{handler="b"} 3.5
+request_duration_seconds_count{handler="b"} 2
+# TYPE rpc_duration_seconds summary
+rpc_duration_seconds{quantile="0.5"} 0.2
+rpc_duration_seconds_sum 8
+rpc_duration_seconds_count 40
 `)
 
 	testCases := []struct {
@@ -200,6 +213,9 @@ http_requests_total{code="503"} 5
 		{name: "regex is anchored", input: inputPrometheusSeries, key: `http_requests_total{code=~"5"}`, format: PrometheusFormat, expectErr: true},
 		{name: "not regex", input: inputPrometheusSeries, key: `http_requests_total{code!~"5.."}`, format: PrometheusFormat, expectVal: 7},
 		{name: "missing label is empty", input: inputPrometheusSeries, key: `http_requests_total{method=""}`, format: PrometheusFormat, expectVal: 5},
+		{name: "histogram count", input: inputPrometheusSeries, key: `request_duration_seconds_count{handler="b"}`, format: PrometheusFormat, expectVal: 2},
+		{name: "histogram bucket", input: inputPrometheusSeries, key: `request_duration_seconds_bucket{handler="a",le="0.5"}`, format: PrometheusFormat, expectVal: 4},
+		{name: "summary count", input: inputPrometheusSeries, key: `rpc_duration_seconds_count`, format: PrometheusFormat, expectVal: 40},
 	}
 
 	for _, tc := range testCases {
