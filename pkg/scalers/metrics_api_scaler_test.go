@@ -166,6 +166,11 @@ func TestGetValueFromResponse(t *testing.T) {
 	random_metric 10`)
 	// Ending the file without new line is intended to verify
 	// https://github.com/kedacore/keda/issues/6559
+	inputPrometheusSeries := []byte(`# TYPE http_requests_total counter
+http_requests_total{code="200",method="get"} 7
+http_requests_total{code="500",method="get"} 3
+http_requests_total{code="503"} 5
+`)
 
 	testCases := []struct {
 		name      string
@@ -190,6 +195,11 @@ func TestGetValueFromResponse(t *testing.T) {
 		{name: "multiple labels not queried", input: inputPrometheus, key: "backend_queue_size{queueName=\"two\"}", format: PrometheusFormat, expectVal: 2},
 		{name: "multiple labels queried", input: inputPrometheus, key: "backend_queue_size{queueName=\"two\", instance=\"zero\"}", format: PrometheusFormat, expectVal: 20},
 		{name: "invalid data", input: inputPrometheus, key: "backend_queue_size{invalid=test}", format: PrometheusFormat, expectErr: true},
+		{name: "not equal", input: inputPrometheusSeries, key: `http_requests_total{code!="200"}`, format: PrometheusFormat, expectVal: 3},
+		{name: "regex", input: inputPrometheusSeries, key: `http_requests_total{code=~"5.."}`, format: PrometheusFormat, expectVal: 3},
+		{name: "regex is anchored", input: inputPrometheusSeries, key: `http_requests_total{code=~"5"}`, format: PrometheusFormat, expectErr: true},
+		{name: "not regex", input: inputPrometheusSeries, key: `http_requests_total{code!~"5.."}`, format: PrometheusFormat, expectVal: 7},
+		{name: "missing label is empty", input: inputPrometheusSeries, key: `http_requests_total{method=""}`, format: PrometheusFormat, expectVal: 5},
 	}
 
 	for _, tc := range testCases {
@@ -198,6 +208,8 @@ func TestGetValueFromResponse(t *testing.T) {
 
 			if tc.expectErr {
 				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
 			}
 
 			assert.EqualValues(t, tc.expectVal, v)

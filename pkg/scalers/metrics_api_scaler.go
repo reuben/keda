@@ -214,7 +214,6 @@ func getValueFromPrometheusResponse(body []byte, valueLocation string) (float64,
 		labels := metric.GetLabel()
 		match := true
 		for _, matcher := range matchers {
-			matcherFound := false
 			if matcher == nil {
 				continue
 			}
@@ -223,13 +222,14 @@ func getValueFromPrometheusResponse(body []byte, valueLocation string) (float64,
 			if matcher.Name == "__name__" {
 				continue
 			}
+			// A label the series doesn't have is empty, as in Prometheus
+			value := ""
 			for _, label := range labels {
-				if *label.Name == matcher.Name &&
-					*label.Value == matcher.Value {
-					matcherFound = true
+				if label.GetName() == matcher.Name {
+					value = label.GetValue()
 				}
 			}
-			if !matcherFound {
+			if !matcher.Matches(value) {
 				match = false
 			}
 		}
